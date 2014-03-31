@@ -124,7 +124,6 @@ main( int argc, char ** argv )
 
 }
 
-
 void respondWithPage(int socket) {
   char message[MAX_MESSAGE];
   char * request[3];
@@ -140,12 +139,15 @@ void respondWithPage(int socket) {
 
   if (bytes_received< 0) { // error
     fprintf(stderr, "recv error\n");
+
   } else if (bytes_received == 0) { // socket closed
     fprintf(stderr, "client unexpectedly closed socket\n");
 
   } else { // message received!
     
     printf("%s", message);
+    
+    // divide message by newlines
     request[0] = strtok (message, " \t\n");
 
     if ( strncmp(request[0], "GET\0", 4) == 0 ) {
@@ -182,8 +184,11 @@ void respondWithPage(int socket) {
 	} else { // ERROR 404!!!
 	  write(socket, "HTTP/1.0 404 Not Found\n", 23); 
 	}
-      } 
-    }
+
+      }  // end else reply with file
+    } // end if ( GET )
   } // end message received
+
+// return
 }
 
