@@ -24,21 +24,27 @@ const char * usage =
 "the time of the day.                                           \n"
 "                                                               \n";
 
-
-#include <sys/types.h>
-#include <sys/socket.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
+#include <unistd.h>
 
 int QueueLength = 5;
+const int MAX_MESSAGE = 10240;
+const int BYTES = 1024;
+char * ROOT;
+const char * dir = "/http-root-dir/htdocs";
 
 // Processes time request
 void processTimeRequest( int socket );
+void respondWithPage(int socket);
 
 int
 main( int argc, char ** argv )
@@ -51,6 +57,10 @@ main( int argc, char ** argv )
 
   // Get the port from the arguments
   int port = atoi( argv[1] );
+
+  ROOT = getenv("PWD");
+  strncat( ROOT, dir, strlen(dir) );
+  
 
   // Set the IP address and port for this server
   struct sockaddr_in serverIPAddress; 
@@ -67,7 +77,7 @@ main( int argc, char ** argv )
   }
 
   // Set socket options to reuse port. Otherwise we will
-  // have to wait about 2 minutes before reusing the sae port number
+  // have to wait about 2 minutes before reusing the same port number
   int optval = 1; 
   int err = setsockopt(masterSocket, SOL_SOCKET, SO_REUSEADDR, 
       (char *) &optval, sizeof( int ) );
@@ -89,14 +99,15 @@ main( int argc, char ** argv )
     exit( -1 );
   }
 
+  // loop forever
   while ( 1 ) {
 
     // Accept incoming connections
     struct sockaddr_in clientIPAddress;
     int alen = sizeof( clientIPAddress );
     int slaveSocket = accept( masterSocket,
-	(struct sockaddr *)&clientIPAddress,
-	(socklen_t*)&alen);
+			      (struct sockaddr *)&clientIPAddress,
+			      (socklen_t*)&alen);
 
     if ( slaveSocket < 0 ) {
       perror( "accept" );
@@ -104,7 +115,8 @@ main( int argc, char ** argv )
     }
 
     // Process request.
-    processTimeRequest( slaveSocket );
+    //processTimeRequest( slaveSocket );
+    respondWithPage( slaveSocket );
 
     // Close socket
     close( slaveSocket );
@@ -112,68 +124,66 @@ main( int argc, char ** argv )
 
 }
 
-  void
-processTimeRequest( int fd )
-{
-  // Buffer used to store the name received from the client
-  const int MaxName = 1024;
-  char name[ MaxName + 1 ];
-  int nameLength = 0;
-  int n;
 
-  // Send prompt
-  const char * prompt = "\nType your name:";
-  write( fd, prompt, strlen( prompt ) );
+void respondWithPage(int socket) {
+  char message[MAX_MESSAGE];
+  char * request[3];
+  char data_to_send[BYTES];
+  char path[MAX_MESSAGE];
 
-  // Currently character read
-  unsigned char newChar;
+  int bytes_received; 
+  int fd;
+  int bytes_read;
 
-  // Last character read
-  unsigned char lastChar = 0;
+  memset( (void*)message, (int)'\0', MAX_MESSAGE );
+  bytes_received = recv(socket, message, MAX_MESSAGE, 0);
 
-  //
-  // The client should send <name><cr><lf>
-  // Read the name of the client character by character until a
-  // <CR><LF> is found.
-  //
+  if (bytes_received< 0) { // error
+    fprintf(stderr, "recv error\n");
+  } else if (bytes_received == 0) { // socket closed
+    fprintf(stderr, "client unexpectedly closed socket\n");
 
-  while ( nameLength < MaxName &&
-      ( n = read( fd, &newChar, sizeof(newChar) ) ) > 0 ) {
+  } else { // message received!
+    
+    printf("%s", message);
+    request[0] = strtok (message, " \t\n");
 
-    if ( lastChar == '\015' && newChar == '\012' ) {
-      // Discard previous <CR> from name
-      nameLength--;
-      break;
+    if ( strncmp(request[0], "GET\0", 4) == 0 ) {
+      request[1] = strtok (NULL, " \t");
+      request[2] = strtok (NULL, " \t\n");
+
+      // check for bad requests (error 400)
+      if ( strncmp( request[2], "HTTP/1.0", 8) != 0 && 
+	   strncmp( request[2], "HTTP/1.1", 8) != 0 ) {
+	write(socket, "HTTP/1.0 400 Bad Request\n", 25);
+
+      // reply with the file
+      } else {
+
+	// if we get a request for '/' send index.html by default
+	if ( strncmp(request[1], "/\0", 2) == 0 ) {
+	  request[1] = "/index.html";        
+	}
+
+	strcpy(path, ROOT);
+	strcpy(&path[strlen(ROOT)], request[1]);
+
+	printf("file requested: %s\n", path);
+
+	// read file and send it over the socket
+	if ( (fd = open(path, O_RDONLY)) != -1 ) {
+	  send(socket, "HTTP/1.0 200 OK\n\n", 17, 0);
+
+	  while ( (bytes_read = read(fd, data_to_send, BYTES)) > 0 ) {
+	    write (socket, data_to_send, bytes_read);
+	  }
+
+	// file not found
+	} else { // ERROR 404!!!
+	  write(socket, "HTTP/1.0 404 Not Found\n", 23); 
+	}
+      } 
     }
-
-    name[ nameLength ] = newChar;
-    nameLength++;
-
-    lastChar = newChar;
-  }
-
-  // Add null character at the end of the string
-  name[ nameLength ] = 0;
-
-  printf( "name=%s\n", name );
-
-  // Get time of day
-  time_t now;
-  time(&now);
-  char	*timeString = ctime(&now);
-
-  // Send name and greetings
-  const char * hi = "\nHi ";
-  const char * timeIs = " the time is:\n";
-  write( fd, hi, strlen( hi ) );
-  write( fd, name, strlen( name ) );
-  write( fd, timeIs, strlen( timeIs ) );
-
-  // Send the time of day 
-  write(fd, timeString, strlen(timeString));
-
-  // Send last newline
-  const char * newline="\n";
-  write(fd, newline, strlen(newline));
-
+  } // end message received
 }
+
