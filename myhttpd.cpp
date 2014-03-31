@@ -1,6 +1,7 @@
 #include <fcntl.h>
-#include <netinet/in.h>
 #include <netdb.h>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -35,37 +36,51 @@ const char * usage =
 "the time of the day.                                           \n"
 "                                                               \n";
 
+#define MAX_MESSAGE 10240
+#define BYTES 1024
+#define DEFAULT_PORT 14566
+
 int QueueLength = 5;
-const int MAX_MESSAGE = 10240;
-const int BYTES = 1024;
 char * ROOT;
 const char * dir = "/http-root-dir";
 
-// Processes time request
-void processTimeRequest( int socket );
 void respondWithPage(int socket);
 
 int
 main( int argc, char ** argv )
 {
-  // Print usage if not enough arguments
-  if ( argc < 2 ) {
+  int port;
+  char flag = '\0';
+
+  // handle cli arguments
+  if ( argc == 2 ) {
+
+    if ( argv[1][0] == '-' ) { // we have a flag and no port
+      flag = argv[1][1];
+      port = DEFAULT_PORT;
+    } else { // port and no flag
+      port = atoi( argv[1] );
+    }
+
+  } else if ( argc == 3 ) { // port and flag
+    flag = argv[2][1];
+    port = atoi( argv[2] );
+
+  } else { // ya dun goofed
     fprintf( stderr, "%s", usage );
     exit( -1 );
   }
 
-  // Get the port from the arguments
-  int port = atoi( argv[1] );
 
   ROOT = getenv("PWD");
   strncat( ROOT, dir, strlen(dir) );
   
   // Set the IP address and port for this server
-  struct sockaddr_in serverIPAddress; 
-  memset( &serverIPAddress, 0, sizeof(serverIPAddress) );
-  serverIPAddress.sin_family = AF_INET;
-  serverIPAddress.sin_addr.s_addr = INADDR_ANY;
-  serverIPAddress.sin_port = htons((u_short) port);
+  struct sockaddr_in serverIP; 
+  memset( &serverIP, 0, sizeof(serverIP) );
+  serverIP.sin_family = AF_INET;
+  serverIP.sin_addr.s_addr = INADDR_ANY;
+  serverIP.sin_port = htons((u_short) port);
 
   // Allocate a socket
   int masterSocket =  socket(PF_INET, SOCK_STREAM, 0);
@@ -77,25 +92,21 @@ main( int argc, char ** argv )
   // Set socket options to reuse port. Otherwise we will
   // have to wait about 2 minutes before reusing the same port number
   int optval = 1; 
-  int error = setsockopt(masterSocket, SOL_SOCKET, SO_REUSEADDR, 
-			 (char *) &optval, sizeof( int ) );
-  if ( error ) {
+  if (setsockopt(masterSocket, SOL_SOCKET, SO_REUSEADDR, (char *) &optval,
+	sizeof( int ) ) ) {
     perror( "setsockopt" );
     exit( -1 );
   }
 
   // Bind the socket to the IP address and port
-  error = bind( masterSocket, (struct sockaddr *)&serverIPAddress,
-		sizeof(serverIPAddress) );
-  if ( error ) {
+  if (bind(masterSocket, (struct sockaddr *)&serverIP, sizeof(serverIP))) {
     perror("bind");
     exit( -1 );
   }
 
   // Put socket in listening mode and set the 
   // size of the queue of unprocessed connections
-  error = listen( masterSocket, QueueLength);
-  if ( error ) {
+  if ( listen( masterSocket, QueueLength) ) {
     perror("listen");
     exit( -1 );
   }
@@ -106,18 +117,18 @@ main( int argc, char ** argv )
     // Accept incoming connections
     struct sockaddr_in clientIPAddress;
     int addressLength = sizeof( clientIPAddress );
-    int slaveSocket = accept( masterSocket,
+    int clientSocket = accept( masterSocket,
 			      (struct sockaddr *)&clientIPAddress,
 			      (socklen_t*)&addressLength);
 
-    if ( slaveSocket < 0 ) {
+    if ( clientSocket < 0 ) {
       perror( "accept" );
       exit( -1 );
     }
 
-    respondWithPage( slaveSocket );  // Process request.
+    respondWithPage( clientSocket );  // Process request.
 
-    close( slaveSocket ); // Close socket
+    close( clientSocket ); // Close socket
   } // end of while loop
 }
 
@@ -162,19 +173,6 @@ void respondWithPage(int socket) {
 
 	strcpy(path, ROOT);
 	strcpy( &path[strlen(ROOT)], "/htdocs" );
-
-	/*
-	// if we get a request with a folder specified, use that
-	char * c; // location of found '/' after first character
-	// if last occurence of '/' is not the first char in request[0]
-	if ( request[1] != (c = strrchr((char*)(request[1]), '/')) ) {
-	  printf("folder specified\n");
-	} else {
-	  // otherwise, use htdocs folder
-	  printf("appending htdocs\n");
-	  strcpy( &path[strlen(ROOT)], "/htdocs" );
-	}
-	*/
 
 	// if we get a request for '/' send index.html by default
 	if ( strncmp(request[1], "/\0", 2) == 0 ) {
