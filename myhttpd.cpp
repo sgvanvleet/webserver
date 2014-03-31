@@ -39,7 +39,7 @@ int QueueLength = 5;
 const int MAX_MESSAGE = 10240;
 const int BYTES = 1024;
 char * ROOT;
-const char * dir = "/http-root-dir/htdocs";
+const char * dir = "/http-root-dir";
 
 // Processes time request
 void processTimeRequest( int socket );
@@ -128,13 +128,13 @@ void respondWithPage(int socket) {
   char path[MAX_MESSAGE];
 
   int bytes_received; 
-  int fd;
   int bytes_read;
+  int fd;
 
   memset( (void*)message, (int)'\0', MAX_MESSAGE );
   bytes_received = recv(socket, message, MAX_MESSAGE, 0);
 
-  if (bytes_received< 0) { // error
+  if (bytes_received < 0) { // error
     fprintf(stderr, "recv error\n");
 
   } else if (bytes_received == 0) { // socket closed
@@ -143,10 +143,11 @@ void respondWithPage(int socket) {
   } else { // message received!
     printf("%s", message);
     
-    // divide message by newlines
+    // tokenize message
     request[0] = strtok (message, " \t\n");
 
     if ( strncmp(request[0], "GET\0", 4) == 0 ) {
+      // if it's a GET, tokenize some more
       request[1] = strtok (NULL, " \t");
       request[2] = strtok (NULL, " \t\n");
 
@@ -157,16 +158,32 @@ void respondWithPage(int socket) {
 
       // reply with the file
       } else {
+	printf("request: %s\n", request[1]);
+
+	strcpy(path, ROOT);
+	strcpy( &path[strlen(ROOT)], "/htdocs" );
+
+	/*
+	// if we get a request with a folder specified, use that
+	char * c; // location of found '/' after first character
+	// if last occurence of '/' is not the first char in request[0]
+	if ( request[1] != (c = strrchr((char*)(request[1]), '/')) ) {
+	  printf("folder specified\n");
+	} else {
+	  // otherwise, use htdocs folder
+	  printf("appending htdocs\n");
+	  strcpy( &path[strlen(ROOT)], "/htdocs" );
+	}
+	*/
 
 	// if we get a request for '/' send index.html by default
 	if ( strncmp(request[1], "/\0", 2) == 0 ) {
 	  request[1] = "/index.html";        
 	}
 
-	strcpy(path, ROOT);
-	strcpy(&path[strlen(ROOT)], request[1]);
+	strcat(path, request[1]);
 
-	printf("file requested: %s\n", path);
+	printf("sending requested file: %s\n", path);
 
 	// read file and send it over the socket
 	if ( (fd = open(path, O_RDONLY)) != -1 ) {
@@ -185,6 +202,7 @@ void respondWithPage(int socket) {
 	} else { // ERROR 404!!!
 	  write(socket, "HTTP/1.0 404 File Not Found\n", 28); 
 	} // end 404
+
       } // end reply with file
     } // end GET response
   } // end message received
