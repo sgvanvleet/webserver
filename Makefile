@@ -1,12 +1,15 @@
 CXX = g++ -fPIC
 NETLIBS= -lnsl
 
-all: daytime-server use-dlopen hello.so myhttpd
+all: daytime-server use-dlopen hello.so myhttpd client
 
 daytime-server : daytime-server.o
 	$(CXX) -o $@ $@.o $(NETLIBS)
 
 myhttpd : myhttpd.o
+	$(CXX) -o $@ $@.o $(NETLIBS)
+
+client : client.o
 	$(CXX) -o $@ $@.o $(NETLIBS)
 
 use-dlopen: use-dlopen.o
