@@ -69,7 +69,7 @@ main( int argc, char ** argv )
   // Set socket options to reuse port. Otherwise we will
   // have to wait about 2 minutes before reusing the sae port number
   int optval = 1; 
-  int err = setsockopt(masterSocket, SOL_SOCKET, SO_REUSEADDR, 
+  setsockopt(masterSocket, SOL_SOCKET, SO_REUSEADDR, 
       (char *) &optval, sizeof( int ) );
 
   // Bind the socket to the IP address and port
