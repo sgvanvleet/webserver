@@ -1,3 +1,14 @@
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
 
 const char * usage =
 "                                                               \n"
@@ -24,18 +35,6 @@ const char * usage =
 "the time of the day.                                           \n"
 "                                                               \n";
 
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <time.h>
-#include <unistd.h>
-
 int QueueLength = 5;
 const int MAX_MESSAGE = 10240;
 const int BYTES = 1024;
@@ -61,7 +60,6 @@ main( int argc, char ** argv )
   ROOT = getenv("PWD");
   strncat( ROOT, dir, strlen(dir) );
   
-
   // Set the IP address and port for this server
   struct sockaddr_in serverIPAddress; 
   memset( &serverIPAddress, 0, sizeof(serverIPAddress) );
@@ -79,17 +77,16 @@ main( int argc, char ** argv )
   // Set socket options to reuse port. Otherwise we will
   // have to wait about 2 minutes before reusing the same port number
   int optval = 1; 
-  int err = setsockopt(masterSocket, SOL_SOCKET, SO_REUSEADDR, 
-      (char *) &optval, sizeof( int ) );
-  if ( err ) {
+  int error = setsockopt(masterSocket, SOL_SOCKET, SO_REUSEADDR, 
+			 (char *) &optval, sizeof( int ) );
+  if ( error ) {
     perror( "setsockopt" );
     exit( -1 );
   }
 
   // Bind the socket to the IP address and port
-  int error = bind( masterSocket,
-      (struct sockaddr *)&serverIPAddress,
-      sizeof(serverIPAddress) );
+  error = bind( masterSocket, (struct sockaddr *)&serverIPAddress,
+		sizeof(serverIPAddress) );
   if ( error ) {
     perror("bind");
     exit( -1 );
@@ -108,24 +105,20 @@ main( int argc, char ** argv )
 
     // Accept incoming connections
     struct sockaddr_in clientIPAddress;
-    int alen = sizeof( clientIPAddress );
+    int addressLength = sizeof( clientIPAddress );
     int slaveSocket = accept( masterSocket,
 			      (struct sockaddr *)&clientIPAddress,
-			      (socklen_t*)&alen);
+			      (socklen_t*)&addressLength);
 
     if ( slaveSocket < 0 ) {
       perror( "accept" );
       exit( -1 );
     }
 
-    // Process request.
-    //processTimeRequest( slaveSocket );
-    respondWithPage( slaveSocket );
+    respondWithPage( slaveSocket );  // Process request.
 
-    // Close socket
-    close( slaveSocket );
-  }
-
+    close( slaveSocket ); // Close socket
+  } // end of while loop
 }
 
 void respondWithPage(int socket) {
@@ -148,7 +141,6 @@ void respondWithPage(int socket) {
     fprintf(stderr, "client closed socket\n");
 
   } else { // message received!
-    
     printf("%s", message);
     
     // divide message by newlines
@@ -192,12 +184,8 @@ void respondWithPage(int socket) {
 	// file not found
 	} else { // ERROR 404!!!
 	  write(socket, "HTTP/1.0 404 File Not Found\n", 28); 
-	}
-
-      }  // end else reply with file
-    } // end if ( GET )
+	} // end 404
+      } // end reply with file
+    } // end GET response
   } // end message received
-
-// return
 }
-
