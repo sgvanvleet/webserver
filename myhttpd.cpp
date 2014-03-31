@@ -141,7 +141,7 @@ void respondWithPage(int socket) {
     fprintf(stderr, "recv error\n");
 
   } else if (bytes_received == 0) { // socket closed
-    fprintf(stderr, "client unexpectedly closed socket\n");
+    fprintf(stderr, "client closed socket\n");
 
   } else { // message received!
     
@@ -174,15 +174,20 @@ void respondWithPage(int socket) {
 
 	// read file and send it over the socket
 	if ( (fd = open(path, O_RDONLY)) != -1 ) {
-	  send(socket, "HTTP/1.0 200 OK\n\n", 17, 0);
 
+	  // write http header
+	  write(socket, "HTTP/1.0 200 Document follows\n\n", 17);
+	  write(socket, "Server: CS 252 lab5\n", 19);
+	  write(socket, "Content-type: \n\n", 16);
+
+	  // write document
 	  while ( (bytes_read = read(fd, data_to_send, BYTES)) > 0 ) {
 	    write (socket, data_to_send, bytes_read);
 	  }
 
 	// file not found
 	} else { // ERROR 404!!!
-	  write(socket, "HTTP/1.0 404 Not Found\n", 23); 
+	  write(socket, "HTTP/1.0 404 File Not Found\n", 28); 
 	}
 
       }  // end else reply with file
