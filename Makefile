@@ -1,5 +1,7 @@
-CXX = g++ -fPIC
+
+CXX = g++ -fPIC -Wall -Wno-write-strings
 NETLIBS= -lnsl
+
 
 all: daytime-server use-dlopen hello.so myhttpd client
 
@@ -23,6 +25,5 @@ hello.so: hello.o
 	$(CXX) -o $@ -c -I. $<
 
 clean:
-	rm -f *.o use-dlopen hello.so
-	rm -f *.o daytime-server
+	rm -f *.o use-dlopen hello.so myhttpd client daytime-server
 
