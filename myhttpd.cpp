@@ -81,6 +81,10 @@ main( int argc, char ** argv )
   int optval = 1; 
   int err = setsockopt(masterSocket, SOL_SOCKET, SO_REUSEADDR, 
       (char *) &optval, sizeof( int ) );
+  if ( err ) {
+    perror( "setsockopt" );
+    exit( -1 );
+  }
 
   // Bind the socket to the IP address and port
   int error = bind( masterSocket,
