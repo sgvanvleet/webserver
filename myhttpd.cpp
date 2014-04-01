@@ -36,7 +36,7 @@ const char * usage =
 "the time of the day.                                           \n"
 "                                                               \n";
 
-#define MAX_MESSAGE 10240
+#define MAX_MESSAGE 2000
 #define BYTES 1024
 #define DEFAULT_PORT 14566
 
@@ -44,7 +44,7 @@ int QueueLength = 5;
 char * ROOT;
 const char * dir = "/http-root-dir";
 
-void respondWithPage(int socket);
+void * responseHandler(void* socketDescriptor);
 
 int
 main( int argc, char ** argv )
@@ -83,7 +83,7 @@ main( int argc, char ** argv )
   serverIP.sin_port = htons((u_short) port);
 
   // Allocate a socket
-  int masterSocket =  socket(PF_INET, SOCK_STREAM, 0);
+  int masterSocket =  socket(AF_INET, SOCK_STREAM, 0);
   if ( masterSocket < 0) {
     perror("socket");
     exit( -1 );
@@ -103,6 +103,7 @@ main( int argc, char ** argv )
     perror("bind");
     exit( -1 );
   }
+  printf("bind done\n");
 
   // Put socket in listening mode and set the 
   // size of the queue of unprocessed connections
@@ -111,47 +112,56 @@ main( int argc, char ** argv )
     exit( -1 );
   }
 
+  struct sockaddr_in clientIPAddress;
+  int addressLength = sizeof( clientIPAddress );
+  int clientSocket;
+  int * clientSock;
+
   // loop forever
-  while ( 1 ) {
-
-    // Accept incoming connections
-    struct sockaddr_in clientIPAddress;
-    int addressLength = sizeof( clientIPAddress );
-    int clientSocket = accept( masterSocket,
+  printf("waiting for incoming connections\n");
+  while ( (clientSocket = accept( masterSocket,
 			      (struct sockaddr *)&clientIPAddress,
-			      (socklen_t*)&addressLength);
+			      (socklen_t*)&addressLength)) ) {
 
-    if ( clientSocket < 0 ) {
-      perror( "accept" );
-      exit( -1 );
+    printf("connection accepted\n");
+
+    pthread_t cThread;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    clientSock = (int*)malloc( 1 );
+    *clientSock = clientSocket;
+
+    if (pthread_create(&cThread, &attr, responseHandler, 
+	  (void *) clientSock) < 0) {
+      perror("failed to create thread");
+      return 1;
     }
 
-    respondWithPage( clientSocket );  // Process request.
-
-    close( clientSocket ); // Close socket
+    //close( clientSocket ); // Close socket
   } // end of while loop
+
+  if ( clientSocket < 0 ) {
+    perror( "accept failed" );
+    exit( -1 );
+  }
 }
 
-void respondWithPage(int socket) {
+void * responseHandler(void * socketDescriptor) {
   char message[MAX_MESSAGE];
   char * request[3];
   char data_to_send[BYTES];
   char path[MAX_MESSAGE];
 
+  int socket = *(int*)socketDescriptor;
   int bytes_received; 
   int bytes_read;
   int fd;
 
   memset( (void*)message, (int)'\0', MAX_MESSAGE );
-  bytes_received = recv(socket, message, MAX_MESSAGE, 0);
-
-  if (bytes_received < 0) { // error
-    fprintf(stderr, "recv error\n");
-
-  } else if (bytes_received == 0) { // socket closed
-    fprintf(stderr, "client closed socket\n");
-
-  } else { // message received!
+  while( (bytes_received = recv(socket, message, MAX_MESSAGE, 0)) > 0) {
+    // message received!
     printf("%s", message);
     
     // tokenize message
@@ -165,13 +175,13 @@ void respondWithPage(int socket) {
       // check for bad requests (error 400)
       if ( strncmp( request[2], "HTTP/1.0", 8) != 0 && 
 	   strncmp( request[2], "HTTP/1.1", 8) != 0 ) {
-	write(socket, "HTTP/1.0 400 Bad Request\n", 25);
+	write( socket, "HTTP/1.0 400 Bad Request\n", 25 );
 
       // reply with the file
       } else {
 	printf("request: %s\n", request[1]);
 
-	strcpy(path, ROOT);
+	strcpy( path, ROOT );
 	strcpy( &path[strlen(ROOT)], "/htdocs" );
 
 	// if we get a request for '/' send index.html by default
@@ -185,11 +195,12 @@ void respondWithPage(int socket) {
 
 	// read file and send it over the socket
 	if ( (fd = open(path, O_RDONLY)) != -1 ) {
+	  printf("writing doc\n");
 
 	  // write http header
 	  write(socket, "HTTP/1.0 200 Document follows\n\n", 17);
 	  write(socket, "Server: CS 252 lab5\n", 19);
-	  write(socket, "Content-type: \n\n", 16);
+	  //write(socket, "Content-type: \n\n", 16);
 
 	  // write document
 	  while ( (bytes_read = read(fd, data_to_send, BYTES)) > 0 ) {
@@ -200,8 +211,20 @@ void respondWithPage(int socket) {
 	} else { // ERROR 404!!!
 	  write(socket, "HTTP/1.0 404 File Not Found\n", 28); 
 	} // end 404
-
       } // end reply with file
     } // end GET response
-  } // end message received
+  }
+
+  if (bytes_received == -1) { // error
+    fprintf(stderr, "recv error\n");
+    printf("mesg: %s\n", message);
+  } else if (bytes_received == 0) { // socket closed
+    fprintf(stderr, "client disconnected\n");
+    fflush(stdout);
+  }
+
+  // free the socket pointer
+  free (socketDescriptor);
+
+  return 0;
 }
