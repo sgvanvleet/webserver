@@ -9,7 +9,7 @@ daytime-server : daytime-server.o
 	$(CXX) -o $@ $@.o $(NETLIBS)
 
 myhttpd : myhttpd.o
-	$(CXX) -o $@ $@.o $(NETLIBS)
+	$(CXX) -o $@ $@.o $(NETLIBS) -lpthread
 
 client : client.o
 	$(CXX) -o $@ $@.o $(NETLIBS)
