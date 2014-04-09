@@ -51,7 +51,7 @@ char OPTION = '\0'; // cli flag option, if any
 const char * dir = "/http-root-dir";
 
 void * responseHandler(void* socketDescriptor);
-void respond( int socketDescriptor);
+void * respond( int socketDescriptor);
 
 int
 main( int argc, char ** argv )
@@ -136,6 +136,7 @@ main( int argc, char ** argv )
     *clientSock = clientSocket;
 
     if ( OPTION == 't' ) { 
+      /*
       // create a new thread for each requested
       pthread_t cThread;
       pthread_attr_t attr;
@@ -143,18 +144,33 @@ main( int argc, char ** argv )
       pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
       printf("spawning thread to handle response\n");
-      if (pthread_create(&cThread, &attr, responseHandler, (void *) clientSock) < 0) {
+      if (pthread_create(&cThread, &attr, responseHandler, clientSocket) < 0) {
 	perror("failed to create thread");
 	return 1;
       }
 
+      printf("closing socket\n");
+      close( clientSocket ); // Close socket
+      */
+
     } else if ( OPTION == 'f' ) {
+      if (fork() == 0) { // child
+	printf("responding in forked child process\n");
+	respond( clientSocket );
+	printf("closing socket\n");
+	close( clientSocket ); // Close socket
+	exit(0);
+
+      } else { // parent
+	sleep(1);
+      }
       // fork for each request
     } else if ( OPTION == 'p' ) {
     } else { 
       // single threaded behavior
       printf("responding single-threaded\n");
       respond( clientSocket );
+      sleep(1);
       printf("closing socket\n");
       close( clientSocket ); // Close socket
     }
@@ -167,12 +183,48 @@ main( int argc, char ** argv )
   }
 }
 
-void respond( int socket) {
+char * findContentType( char * filename) {
+  int i;
+  char extension[10];
+  
+
+  // loop backwards until we find a .
+  for (i = strlen(filename); i >= 0; i--) {
+    if ( filename[i] == '.') {
+      break;
+    }
+  }
+  i++;
+
+  // i is now the location of '.' preceding the file extension
+  int m = 0;
+  while ( filename[i] != '\0' ) {
+    extension[m] = filename[i]; // grab the extension characters
+    m++;
+    i++;
+  }
+  extension[m] = '\0'; // null terminate the extension string
+
+  printf("extension: %s\n", extension);
+
+  if ( !strcmp(extension, "html") ) {
+    return "text/html";
+  } else if (  !strcmp(extension, "gif")
+//	    || !strcmp(extension, "png") 
+      		      ) {
+    return "image/webp";
+  } else {
+    return "";
+  }
+}
+
+void * respond( int socket ) {
   char message[MAX_MESSAGE];
   char * request[3];
   char data_to_send[BYTES];
   char path[MAX_MESSAGE];
 
+  //int socket = *(int*)socketVoid;
   int bytes_received; 
   int bytes_read;
   int fd;
@@ -189,7 +241,7 @@ void respond( int socket) {
     fflush(stdout);
   } else { 
     // message received!
-    printf("%s", message);
+    printf("\n%s", message);
     
     // tokenize message
     request[0] = strtok (message, " \t\n");
@@ -222,29 +274,41 @@ void respond( int socket) {
 
 	// read file and send it over the socket
 	if ( (fd = open(path, O_RDONLY)) != -1 ) {
-	  printf("writing doc\n");
+
+	  char * contentType = findContentType(request[1]);
+	  printf("writing doc, type: %s\n", contentType);
 
 	  // write http header
-	  write(socket, "HTTP/1.0 200 Document follows\n\n", 17);
-	  write(socket, "Server: CS 252 lab5\n", 19);
-	  write(socket, "Content-type: \n\n", 16);
+	  char write_buf[1024];
+	  sprintf(write_buf, 
+	      "HTTP/1.1 200 Document follows\nServer: CS 252 lab5\nContent-type: %s\n\n",
+	      contentType);
+	  write(socket, write_buf, strlen(write_buf));
 
 	  // write document
 	  while ( (bytes_read = read(fd, data_to_send, BYTES)) > 0 ) {
 	    write (socket, data_to_send, bytes_read);
 	  }
+	  write(socket, "\n", 1);
+	  sleep(1);
 
 	  printf("finished writing document\n");
 	// file not found
 	} else { // ERROR 404!!!
-	  write(socket, "HTTP/1.0 404 File Not Found\n", 28); 
+	  write(socket, "HTTP/1.1 404 File Not Found\n", 28); 
 	} // end 404
       } // end reply with file
     } // end GET response
   } // end while
 
+  return 0;
 }
 
+
+// responseHandler() is called by pthread_create()
+// will spawn threads which stay alive as long as the socket
+// is open, and exit when the socket is closed remotely.
+// in all other ways, responseHandler() is identical to respond()
 void * responseHandler(void * socketDescriptor) {
   char message[MAX_MESSAGE];
   char * request[3];
@@ -257,7 +321,15 @@ void * responseHandler(void * socketDescriptor) {
   int fd;
 
   memset( (void*)message, (int)'\0', MAX_MESSAGE );
-  while( (bytes_received = recv(socket, message, MAX_MESSAGE, 0)) > 0) {
+  bytes_received = recv(socket, message, MAX_MESSAGE, 0);
+
+  if (bytes_received == -1) { // error
+    fprintf(stderr, "recv error\n");
+    printf("mesg: %s\n", message);
+  } else if (bytes_received == 0) { // socket closed
+    fprintf(stderr, "client disconnected\n");
+    fflush(stdout);
+  } else {
     // message received!
     printf("%s", message);
     
@@ -304,7 +376,6 @@ void * responseHandler(void * socketDescriptor) {
 	    write (socket, data_to_send, bytes_read);
 	  }
 
-	  write( socket, "\n", 1 );
 	  printf("finished writing document\n");
 	// file not found
 	} else { // ERROR 404!!!
@@ -314,16 +385,7 @@ void * responseHandler(void * socketDescriptor) {
     } // end GET response
   } // end while
 
-  if (bytes_received == -1) { // error
-    fprintf(stderr, "recv error\n");
-    printf("mesg: %s\n", message);
-  } else if (bytes_received == 0) { // socket closed
-    fprintf(stderr, "client disconnected\n");
-    fflush(stdout);
-  }
-
-  // free the socket pointer
-  sleep(1);
+    // free the socket pointer
   free (socketDescriptor);
 
   return 0;
