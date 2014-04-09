@@ -62,6 +62,10 @@ main( int argc, char ** argv )
   if ( argc == 2 ) {
 
     if ( argv[1][0] == '-' ) { // we have a flag and no port
+      if ( (char)argv[1][1] == '-' || argv[1][1] == 'h') { 
+	fprintf(stderr, "%s", usage);
+	exit (-1);
+      }
       OPTION = (char)argv[1][1];
       port = DEFAULT_PORT;
     } else { // port and no flag
@@ -132,12 +136,13 @@ main( int argc, char ** argv )
 
     printf("connection accepted\n");
 
-    clientSock = (int*)malloc( 1 );
-    *clientSock = clientSocket;
-
     if ( OPTION == 't' ) { 
       /*
       // create a new thread for each requested
+
+      clientSock = (int*)malloc( 1 );
+      *clientSock = clientSocket;
+
       pthread_t cThread;
       pthread_attr_t attr;
       pthread_attr_init(&attr);
@@ -156,6 +161,7 @@ main( int argc, char ** argv )
     } else if ( OPTION == 'f' ) {
       if (fork() == 0) { // child
 	printf("responding in forked child process\n");
+	sleep(1);
 	respond( clientSocket );
 	printf("closing socket\n");
 	close( clientSocket ); // Close socket
@@ -170,7 +176,7 @@ main( int argc, char ** argv )
       // single threaded behavior
       printf("responding single-threaded\n");
       respond( clientSocket );
-      sleep(1);
+      sleep(0.5);
       printf("closing socket\n");
       close( clientSocket ); // Close socket
     }
@@ -271,18 +277,17 @@ void * respond( int socket ) {
 	strcat(path, request[1]);
 
 	printf("sending requested file: %s\n", path);
+	char * contentType = findContentType(request[1]);
+	char write_buf[1024];
 
 	// read file and send it over the socket
 	if ( (fd = open(path, O_RDONLY)) != -1 ) {
 
-	  char * contentType = findContentType(request[1]);
 	  printf("writing doc, type: %s\n", contentType);
 
 	  // write http header
-	  char write_buf[1024];
 	  sprintf(write_buf, 
-	      "HTTP/1.1 200 Document follows\nServer: CS 252 lab5\nContent-type: %s\n\n",
-	      contentType);
+	      "HTTP/1.1 200 Document follows\nServer: CS 252 lab5\nContent-type: %s\n\n", contentType);
 	  write(socket, write_buf, strlen(write_buf));
 
 	  // write document
@@ -290,12 +295,15 @@ void * respond( int socket ) {
 	    write (socket, data_to_send, bytes_read);
 	  }
 	  write(socket, "\n", 1);
-	  sleep(1);
 
 	  printf("finished writing document\n");
 	// file not found
 	} else { // ERROR 404!!!
-	  write(socket, "HTTP/1.1 404 File Not Found\n", 28); 
+	  printf("404 file not found!\n");
+	  sprintf(write_buf, 
+	      "HTTP/1.1 404 File Not Found\nServer: CS 252 lab5\nContent-type: %s\n\n<html><h1>404 File Not Found</h1></html>\n",
+	      contentType);
+	  write(socket, write_buf, strlen(write_buf));
 	} // end 404
       } // end reply with file
     } // end GET response
