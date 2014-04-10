@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -161,14 +162,15 @@ main( int argc, char ** argv )
     } else if ( OPTION == 'f' ) {
       if (fork() == 0) { // child
 	printf("responding in forked child process\n");
-	sleep(1);
+	//sleep(1);
 	respond( clientSocket );
 	printf("closing socket\n");
+	shutdown( clientSocket, 2);
 	close( clientSocket ); // Close socket
 	exit(0);
 
       } else { // parent
-	sleep(1);
+	//sleep(1);
       }
       // fork for each request
     } else if ( OPTION == 'p' ) {
@@ -178,6 +180,7 @@ main( int argc, char ** argv )
       respond( clientSocket );
       sleep(0.5);
       printf("closing socket\n");
+      shutdown( clientSocket, 0);
       close( clientSocket ); // Close socket
     }
 
@@ -262,8 +265,48 @@ void * respond( int socket ) {
 	   strncmp( request[2], "HTTP/1.1", 8) != 0 ) {
 	write( socket, "HTTP/1.0 400 Bad Request\n", 25 );
 
-      // reply with the file
+      } else if ( !strncmp(request[1], "/cgi-bin/", strlen("/cgi-bin/")) ) {
+	// CGI response
+	pid_t pid;
+	if ( (pid = fork()) == 0) {
+	  // in the child process
+	  
+	  // tokenize the request to separate variable=value part
+	  char * execvars[2];
+      	  execvars[0] = strtok(request[1], "?");
+	  execvars[1] = strtok(NULL, "\0");
+	  if (execvars[1] != NULL) { // only if we have variables
+	    setenv("REQUEST_METHOD", "GET", 1);
+	    setenv("QUERY_STRING", execvars[1], 1);
+	  }
+	  
+	  printf("QUERY_STRING: %s\n", getenv("QUERY_STRING"));
+
+	  // expand the file location
+	  if ( !strcmp( request[1] + strlen("/cgi-bin/"), "finger") ) {
+	    //execvars[1] = NULL;
+	  } 
+	  strcpy( path, ROOT );
+	  strcat( path, execvars[0]);
+	  execvars[0] = path;
+	  printf("executing: %s\nargs: %s\n", execvars[0], execvars[1]);
+
+	  // redirect output to socket
+	  dup2(socket, STDOUT_FILENO);
+	  dup2(socket, STDERR_FILENO);
+	  close(socket);
+
+	  printf("HTTP/1.1 200 Document follows\nServer: CS 252 lab5\n");
+	  execvp(execvars[0], execvars);
+	  printf("\n");
+	} else {
+	  // in the parent
+	  pid_t endID = waitpid( pid, NULL, 0 ); // wait for process
+	  printf("killed child: endID = %d\n", (int)endID);
+	}
+
       } else {
+	// reply with the file
 	printf("request: %s\n", request[1]);
 
 	strcpy( path, ROOT );
@@ -272,6 +315,9 @@ void * respond( int socket ) {
 	// if we get a request for '/' send index.html by default
 	if ( strncmp(request[1], "/\0", 2) == 0 ) {
 	  request[1] = "/index.html";        
+	} else if ( !strcmp( request[1], "/favicon.ico" ) ) {
+	  // ignore requests for the favicon
+	  return 0;
 	}
 
 	strcat(path, request[1]);
