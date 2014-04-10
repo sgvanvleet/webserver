@@ -138,7 +138,6 @@ main( int argc, char ** argv )
     printf("connection accepted\n");
 
     if ( OPTION == 't' ) { 
-      /*
       // create a new thread for each requested
 
       clientSock = (int*)malloc( 1 );
@@ -150,14 +149,13 @@ main( int argc, char ** argv )
       pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
       printf("spawning thread to handle response\n");
-      if (pthread_create(&cThread, &attr, responseHandler, clientSocket) < 0) {
+      if (pthread_create(&cThread, &attr, 
+	    (void * (*)(void *))responseHandler, (void *)clientSock) < 0) {
 	perror("failed to create thread");
 	return 1;
       }
 
       printf("closing socket\n");
-      close( clientSocket ); // Close socket
-      */
 
     } else if ( OPTION == 'f' ) {
       if (fork() == 0) { // child
@@ -165,8 +163,6 @@ main( int argc, char ** argv )
 	//sleep(1);
 	respond( clientSocket );
 	printf("closing socket\n");
-	shutdown( clientSocket, 2);
-	close( clientSocket ); // Close socket
 	exit(0);
 
       } else { // parent
@@ -180,8 +176,6 @@ main( int argc, char ** argv )
       respond( clientSocket );
       sleep(0.5);
       printf("closing socket\n");
-      shutdown( clientSocket, 0);
-      close( clientSocket ); // Close socket
     }
 
   } // end of while loop
@@ -355,6 +349,8 @@ void * respond( int socket ) {
     } // end GET response
   } // end while
 
+  shutdown( socket, 2);
+  close( socket ); // Close socket
   return 0;
 }
 
@@ -364,83 +360,8 @@ void * respond( int socket ) {
 // is open, and exit when the socket is closed remotely.
 // in all other ways, responseHandler() is identical to respond()
 void * responseHandler(void * socketDescriptor) {
-  char message[MAX_MESSAGE];
-  char * request[3];
-  char data_to_send[BYTES];
-  char path[MAX_MESSAGE];
-
   int socket = *(int*)socketDescriptor;
-  int bytes_received; 
-  int bytes_read;
-  int fd;
 
-  memset( (void*)message, (int)'\0', MAX_MESSAGE );
-  bytes_received = recv(socket, message, MAX_MESSAGE, 0);
-
-  if (bytes_received == -1) { // error
-    fprintf(stderr, "recv error\n");
-    printf("mesg: %s\n", message);
-  } else if (bytes_received == 0) { // socket closed
-    fprintf(stderr, "client disconnected\n");
-    fflush(stdout);
-  } else {
-    // message received!
-    printf("%s", message);
-    
-    // tokenize message
-    request[0] = strtok (message, " \t\n");
-
-    if ( strncmp(request[0], "GET\0", 4) == 0 ) {
-      // if it's a GET, tokenize some more
-      request[1] = strtok (NULL, " \t");
-      request[2] = strtok (NULL, " \t\n");
-
-      // check for bad requests (error 400)
-      if ( strncmp( request[2], "HTTP/1.0", 8) != 0 && 
-	   strncmp( request[2], "HTTP/1.1", 8) != 0 ) {
-	write( socket, "HTTP/1.0 400 Bad Request\n", 25 );
-
-      // reply with the file
-      } else {
-	printf("request: %s\n", request[1]);
-
-	strcpy( path, ROOT );
-	strcpy( &path[strlen(ROOT)], "/htdocs" );
-
-	// if we get a request for '/' send index.html by default
-	if ( strncmp(request[1], "/\0", 2) == 0 ) {
-	  request[1] = "/index.html";        
-	}
-
-	strcat(path, request[1]);
-
-	printf("sending requested file: %s\n", path);
-
-	// read file and send it over the socket
-	if ( (fd = open(path, O_RDONLY)) != -1 ) {
-	  printf("writing doc\n");
-
-	  // write http header
-	  write(socket, "HTTP/1.0 200 Document follows\n\n", 17);
-	  write(socket, "Server: CS 252 lab5\n", 19);
-	  write(socket, "Content-type: \n\n", 16);
-
-	  // write document
-	  while ( (bytes_read = read(fd, data_to_send, BYTES)) > 0 ) {
-	    write (socket, data_to_send, bytes_read);
-	  }
-
-	  printf("finished writing document\n");
-	// file not found
-	} else { // ERROR 404!!!
-	  write(socket, "HTTP/1.0 404 File Not Found\n", 28); 
-	} // end 404
-      } // end reply with file
-    } // end GET response
-  } // end while
-
-    // free the socket pointer
-  free (socketDescriptor);
-
+  respond(socket);
   return 0;
 }
