@@ -51,12 +51,13 @@ char * ROOT;
 char OPTION = '\0'; // cli flag option, if any
 const char * dir = "/http-root-dir";
 
+pthread_mutex_t mutex;
+
 void * responseHandler(void* socketDescriptor);
 void * respond( int socketDescriptor);
+void * poolResponseHandler(void * );
 
-int
-main( int argc, char ** argv )
-{
+int main( int argc, char ** argv ) {
   int port;
 
   // handle cli arguments
@@ -82,7 +83,7 @@ main( int argc, char ** argv )
     exit( -1 );
   }
 
-  printf("option = %c\n", (char)OPTION);
+  printf("cli option = %c\n", (char)OPTION);
 
   ROOT = getenv("PWD");
   strncat( ROOT, dir, strlen(dir) );
@@ -130,66 +131,113 @@ main( int argc, char ** argv )
   int * clientSock;
 
   // loop forever
-  printf("waiting for incoming connections\n");
-  while ( (clientSocket = accept( masterSocket,
-			      (struct sockaddr *)&clientIPAddress,
-			      (socklen_t*)&addressLength)) ) {
 
-    printf("connection accepted\n");
+  if (OPTION == 'p') {
+    // spawn 5 threads with poolResponseHandler running
+    printf("creating pool of threads\n");
+    pthread_t pool[5];
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
 
-    if ( OPTION == 't' ) { 
-      // create a new thread for each requested
+    pthread_mutex_init(&mutex, NULL);
 
-      clientSock = (int*)malloc( 1 );
-      *clientSock = clientSocket;
+    int * masterSock;
+    masterSock = (int*)malloc( 1 );
+    *masterSock = masterSocket;
 
-      pthread_t cThread;
-      pthread_attr_t attr;
-      pthread_attr_init(&attr);
-      pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-
-      printf("spawning thread to handle response\n");
-      if (pthread_create(&cThread, &attr, 
-	    (void * (*)(void *))responseHandler, (void *)clientSock) < 0) {
-	perror("failed to create thread");
-	return 1;
-      }
-
-      printf("closing socket\n");
-
-    } else if ( OPTION == 'f' ) {
-      if (fork() == 0) { // child
-	printf("responding in forked child process\n");
-	//sleep(1);
-	respond( clientSocket );
-	printf("closing socket\n");
-	exit(0);
-
-      } else { // parent
-	//sleep(1);
-      }
-      // fork for each request
-    } else if ( OPTION == 'p' ) {
-    } else { 
-      // single threaded behavior
-      printf("responding single-threaded\n");
-      respond( clientSocket );
-      sleep(0.5);
-      printf("closing socket\n");
+    int i;
+    for (i = 0; i < 5; i++) {
+      pthread_create( &(pool[i]), &attr, 
+	  (void * (*)(void*))poolResponseHandler, 
+	  (void *) masterSock);
     }
 
-  } // end of while loop
+    for (i = 0; i < 5; i++) {
+      pthread_join(pool[i], NULL);
+    }
+    
+  } else {
+    printf("waiting for incoming connections\n");
+    while ( (clientSocket = accept( masterSocket,
+				(struct sockaddr *)&clientIPAddress,
+				(socklen_t*)&addressLength)) ) {
 
-  if ( clientSocket < 0 ) {
-    perror( "accept failed" );
-    exit( -1 );
+      printf("connection accepted\n");
+
+      if ( OPTION == 't' ) { 
+	// create a new thread for each requested
+	clientSock = (int*)malloc( 1 );
+	*clientSock = clientSocket;
+
+	pthread_t cThread;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+	printf("spawning thread to handle response\n");
+	if (pthread_create(&cThread, &attr, 
+	      (void * (*)(void *))responseHandler, (void *)clientSock) < 0) {
+	  perror("failed to create thread");
+	  return 1;
+	}
+
+      } else if ( OPTION == 'f' ) {
+	// fork for each request
+	if (fork() == 0) { // child
+	  printf("responding in forked child process\n");
+	  respond( clientSocket );
+	  exit(0);
+	} else { // parent
+	}
+      } else if ( OPTION == 'p' ) {
+      } else { 
+	// single threaded behavior
+	printf("responding single-threaded\n");
+	respond( clientSocket );
+      }
+    } // end of while loop
+
+    if ( clientSocket < 0 ) {
+      perror( "accept failed" );
+      exit( -1 );
+    }
+  }
+}
+
+void * poolResponseHandler(void * masterSocketDescriptor) {
+  int masterSocket = *(int*)masterSocketDescriptor;
+
+  while (1) {
+    struct sockaddr_in clientIPAddress;
+    int alen = sizeof( clientIPAddress);
+
+    // don't want multiple threads calling accept() at the same time
+    pthread_mutex_lock(&mutex);
+
+    int clientSocket = accept(masterSocket, 
+	(struct sockaddr*)&clientIPAddress,
+	(socklen_t*)&alen);
+
+    pthread_mutex_unlock(&mutex);
+
+    int * clientSock;
+    clientSock = (int*)malloc( 1 );
+    *clientSock = clientSocket;
+
+    if (clientSocket < 0 ) {
+      perror( "accept" );
+      exit( -1 );
+    }
+
+    //process request
+    responseHandler(clientSock);
   }
 }
 
 char * findContentType( char * filename) {
   int i;
   char extension[10];
-  
 
   // loop backwards until we find a .
   for (i = strlen(filename); i >= 0; i--) {
@@ -212,12 +260,10 @@ char * findContentType( char * filename) {
 
   if ( !strcmp(extension, "html") ) {
     return "text/html";
-  } else if (  !strcmp(extension, "gif")
-//	    || !strcmp(extension, "png") 
-      		      ) {
+  } else if (  !strcmp(extension, "gif")) {
     return "image/webp";
   } else {
-    return "";
+    return "text/plain";
   }
 }
 
@@ -278,7 +324,7 @@ void * respond( int socket ) {
 
 	  // expand the file location
 	  if ( !strcmp( request[1] + strlen("/cgi-bin/"), "finger") ) {
-	    //execvars[1] = NULL;
+	    execvars[1] = NULL;
 	  } 
 	  strcpy( path, ROOT );
 	  strcat( path, execvars[0]);
@@ -349,6 +395,7 @@ void * respond( int socket ) {
     } // end GET response
   } // end while
 
+  printf("closing socket\n");
   shutdown( socket, 2);
   close( socket ); // Close socket
   return 0;
@@ -356,9 +403,6 @@ void * respond( int socket ) {
 
 
 // responseHandler() is called by pthread_create()
-// will spawn threads which stay alive as long as the socket
-// is open, and exit when the socket is closed remotely.
-// in all other ways, responseHandler() is identical to respond()
 void * responseHandler(void * socketDescriptor) {
   int socket = *(int*)socketDescriptor;
 
