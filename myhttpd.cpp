@@ -62,7 +62,6 @@ int main( int argc, char ** argv ) {
 
   // handle cli arguments
   if ( argc == 2 ) {
-
     if ( argv[1][0] == '-' ) { // we have a flag and no port
       if ( (char)argv[1][1] == '-' || argv[1][1] == 'h') { 
 	fprintf(stderr, "%s", usage);
@@ -130,7 +129,6 @@ int main( int argc, char ** argv ) {
   int clientSocket;
   int * clientSock;
 
-  // loop forever
 
   if (OPTION == 'p') {
     // spawn 5 threads with poolResponseHandler running
@@ -158,6 +156,7 @@ int main( int argc, char ** argv ) {
     }
     
   } else {
+    // loop forever
     printf("waiting for incoming connections\n");
     while ( (clientSocket = accept( masterSocket,
 				(struct sockaddr *)&clientIPAddress,
@@ -277,6 +276,9 @@ void * respond( int socket ) {
   int bytes_received; 
   int bytes_read;
   int fd;
+  
+  // clear this variable
+  setenv("QUERY_STRING", "", 1);
 
   memset( (void*)message, (int)'\0', MAX_MESSAGE );
   // receive message on socket
